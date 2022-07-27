@@ -223,12 +223,7 @@ function compression (options) {
 
       // compression method
       var accept = accepts(req)
-      var method = accept.encoding(['br', 'gzip', 'deflate', 'identity'])
-
-      // we really don't prefer deflate
-      if (method === 'deflate' && accept.encoding(['gzip'])) {
-        method = accept.encoding(['gzip', 'identity'])
-      }
+      var method = accept.encoding(['br']) || accept.encoding(['gzip', 'identity'])
 
       // negotiation failed
       if (!method || method === 'identity') {
@@ -240,9 +235,7 @@ function compression (options) {
       debug('%s compression', method)
       stream = method === 'br'
         ? zlib.createBrotliCompress()
-        : method === 'gzip'
-        ? zlib.createGzip(opts)
-        : zlib.createDeflate(opts)
+        : zlib.createGzip(opts)
 
       // add buffered listeners to stream
       addListeners(stream, stream.on, listeners)
