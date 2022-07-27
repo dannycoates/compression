@@ -18,7 +18,6 @@ var accepts = require('accepts')
 var Buffer = require('safe-buffer').Buffer
 var bytes = require('bytes')
 var compressible = require('compressible')
-var debug = require('debug')('compression')
 var onHeaders = require('on-headers')
 var vary = require('vary')
 var zlib = require('zlib')
@@ -52,11 +51,7 @@ function compression (options) {
 
   // options
   var filter = opts.filter || shouldCompress
-  var threshold = bytes.parse(opts.threshold)
-
-  if (threshold == null) {
-    threshold = 1024
-  }
+  var threshold = 1024
 
   function noop () { }
 
@@ -180,7 +175,6 @@ function compression (options) {
     }
 
     function nocompress (msg) {
-      debug('no compression: %s', msg)
       addListeners(res, _on, listeners)
       listeners = null
     }
@@ -232,7 +226,6 @@ function compression (options) {
       }
 
       // compression stream
-      debug('%s compression', method)
       stream = method === 'br'
         ? zlib.createBrotliCompress()
         : zlib.createGzip(opts)
@@ -298,7 +291,6 @@ function shouldCompress (req, res) {
   var type = res.getHeader('Content-Type')
 
   if (type === undefined || !compressible(type)) {
-    debug('%s not compressible', type)
     return false
   }
 
