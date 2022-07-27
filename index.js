@@ -22,6 +22,8 @@ var debug = require('debug')('compression')
 var onHeaders = require('on-headers')
 var vary = require('vary')
 var zlib = require('zlib')
+var isUint8Array = require('@stdlib/assert-is-uint8array')
+const { ServerResponse } = require('http')
 
 /**
  * Module exports.
@@ -56,6 +58,8 @@ function compression (options) {
     threshold = 1024
   }
 
+  function noop () { }
+
   return function compression (req, res, next) {
     var ended = false
     var length
@@ -75,9 +79,37 @@ function compression (options) {
 
     // proxy
 
-    res.write = function write (chunk, encoding) {
-      if (ended) {
-        return false
+    res.write = function write (chunk, encoding, callback) {
+      if (chunk === null) {
+        // throw ERR_STREAM_NULL_VALUES
+        return _write.call(this, chunk, encoding, callback)
+      } else if (typeof chunk === 'string' || isUint8Array(chunk)) {
+        // noop
+      } else {
+        // throw ERR_INVALID_ARG_TYPE
+        return _write.call(this, chunk, encoding, callback)
+      }
+
+      if (!callback && typeof encoding === 'function') {
+        callback = encoding
+        encoding = undefined
+      }
+
+      if (typeof callback !== 'function') {
+        callback = noop
+      }
+
+      if (res.destroyed || res.finished || ended) {
+        // HACK: node doesn't expose internal errors,
+        // we need to fake response to throw underlying errors type
+        var fakeRes = new ServerResponse({})
+        if (!res.destroyed) {
+          fakeRes.destroyed = fakeRes.finished = true
+        } else {
+          fakeRes.destroyed = true
+        }
+        // throw ERR_STREAM_DESTROYED or ERR_STREAM_WRITE_AFTER_END
+        return _write.call(fakeRes, chunk, encoding, callback)
       }
 
       if (!this._header) {
@@ -85,13 +117,29 @@ function compression (options) {
       }
 
       return stream
-        ? stream.write(toBuffer(chunk, encoding))
-        : _write.call(this, chunk, encoding)
+        ? stream.write(toBuffer(chunk, encoding), encoding, callback)
+        : _write.call(this, chunk, encoding, callback)
     }
 
-    res.end = function end (chunk, encoding) {
-      if (ended) {
-        return false
+    res.end = function end (chunk, encoding, callback) {
+      if (!callback) {
+        if (typeof chunk === 'function') {
+          callback = chunk
+          chunk = encoding = undefined
+        } else if (typeof encoding === 'function') {
+          callback = encoding
+          encoding = undefined
+        }
+      }
+
+      if (typeof callback !== 'function') {
+        callback = noop
+      }
+
+      if (this.destroyed || this.finished || ended) {
+        this.finished = ended
+        // throw ERR_STREAM_WRITE_AFTER_END or ERR_STREAM_ALREADY_FINISHED
+        return _end.call(this, chunk, encoding, callback)
       }
 
       if (!this._header) {
@@ -104,7 +152,7 @@ function compression (options) {
       }
 
       if (!stream) {
-        return _end.call(this, chunk, encoding)
+        return _end.call(this, chunk, encoding, callback)
       }
 
       // mark ended
@@ -112,8 +160,8 @@ function compression (options) {
 
       // write Buffer for Node.js 0.8
       return chunk
-        ? stream.end(toBuffer(chunk, encoding))
-        : stream.end()
+        ? stream.end(toBuffer(chunk, encoding), encoding, callback)
+        : stream.end(callback)
     }
 
     res.on = function on (type, listener) {
@@ -175,7 +223,7 @@ function compression (options) {
 
       // compression method
       var accept = accepts(req)
-      var method = accept.encoding(['gzip', 'deflate', 'identity'])
+      var method = accept.encoding(['br', 'gzip', 'deflate', 'identity'])
 
       // we really don't prefer deflate
       if (method === 'deflate' && accept.encoding(['gzip'])) {
@@ -190,7 +238,9 @@ function compression (options) {
 
       // compression stream
       debug('%s compression', method)
-      stream = method === 'gzip'
+      stream = method === 'br'
+        ? zlib.createBrotliCompress()
+        : method === 'gzip'
         ? zlib.createGzip(opts)
         : zlib.createDeflate(opts)
 
